@@ -8,11 +8,11 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="default"/>
 <meta name="apple-mobile-web-app-title" content="Estudio"/>
 <style>
-  :root{--bg:#f6f7ff;--card:#fff;--ink:#0f172a;--muted:#64748b;--ring:#e5e7eb;--indigo:#4f46e5;--ok:#16a34a;--warn:#dc2626;}
+  :root{--bg:#f6f7ff;--card:#fff;--ink:#0f172a;--muted:#64748b;--ring:#e5e7eb;--indigo:#4f46e5;--ok:#16a34a;--warn:#dc2626}
   *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
-  body{margin:0;background:var(--bg);color:var(--ink);font-family:-apple-system,system-ui,Segoe UI,Roboto,Helvetica,Arial,sans-serif;font-size:17px;line-height:1.4}
+  body{margin:0;background:var(--bg);color:var(--ink);font-family:-apple-system,system-ui,Segoe UI,Roboto,Helvetica,Arial,sans-serif;font-size:17px;line-height:1.45}
   header{position:sticky;top:0;z-index:10;backdrop-filter:blur(8px);background:rgba(255,255,255,.9);border-bottom:1px solid var(--ring)}
-  .wrap{max-width:520px;margin:0 auto;padding:12px 16px}
+  .wrap{max-width:560px;margin:0 auto;padding:12px 16px}
   h1{margin:0;font-size:18px;font-weight:800}
   .muted{color:var(--muted);font-size:13px}
   .grid{display:grid;gap:14px}
@@ -21,12 +21,18 @@
   .btn{height:48px;border-radius:14px;border:1px solid var(--ring);background:#fff;color:var(--ink);font-weight:700;padding:0 16px}
   .btn.primary{background:var(--indigo);color:#fff;border-color:var(--indigo)}
   .btn.full{width:100%}
+  .btn:disabled{opacity:.6}
   .progress{height:14px;background:var(--ring);border-radius:999px;overflow:hidden}
   .progress>div{height:100%;background:var(--indigo);width:0%}
   input[type="number"], input[type="text"], select{width:100%;height:48px;border-radius:14px;border:1px solid var(--ring);padding:0 12px;font-size:16px}
   .ok{color:var(--ok);font-weight:700}
   .bad{color:var(--warn);font-weight:700}
   .pill{font-size:12px;padding:6px 10px;border-radius:999px;background:#eef2ff;border:1px solid var(--ring)}
+  .tabs{display:flex;gap:8px;flex-wrap:wrap}
+  .tab{border:1px solid var(--ring);border-radius:12px;padding:8px 12px;background:#fff;cursor:pointer}
+  .tab.active{background:var(--indigo);color:#fff;border-color:var(--indigo)}
+  .hint{background:#f9fafb;border:1px dashed #d1d5db;border-radius:12px;padding:12px;font-size:14px;color:#374151}
+  .diag{font-size:12px;color:#9ca3af;margin-top:6px}
 </style>
 </head>
 <body>
@@ -53,16 +59,16 @@
     <div class="progress" style="margin-top:8px"><div id="todayBar"></div></div>
   </div>
 
-  <!-- Selector de tema -->
+  <!-- Tabs de tema (Khan style) -->
   <div class="card">
-    <div style="font-weight:700;margin-bottom:8px">Tema</div>
-    <select id="topic">
-      <option value="aritmetica">Aritmética (+, −, ×, ÷)</option>
-      <option value="porcentajes">Porcentajes</option>
-      <option value="fracciones">Fracciones → decimal</option>
-      <option value="velocidad">Física: v = d/t</option>
-    </select>
-    <div class="muted" style="margin-top:8px">Dificultad se adapta sola con tu racha.</div>
+    <div style="font-weight:700;margin-bottom:8px">Elige el tema</div>
+    <div class="tabs" id="tabs">
+      <button class="tab" data-topic="aritmetica">Aritmética</button>
+      <button class="tab" data-topic="porcentajes">Porcentajes</button>
+      <button class="tab" data-topic="fracciones">Fracciones → decimal</button>
+      <button class="tab" data-topic="velocidad">Física: v = d/t</button>
+    </div>
+    <div class="diag" id="diagTabs"></div>
   </div>
 
   <!-- Pregunta -->
@@ -71,21 +77,24 @@
       <div style="font-weight:700">Pregunta</div>
       <div class="pill">Nivel <span id="level">1</span></div>
     </div>
-    <div id="prompt" style="margin:10px 0;font-size:18px;font-weight:600"></div>
-    <div class="grid">
-      <input id="answer" type="text" inputmode="decimal" placeholder="Escribe tu respuesta"/>
+    <div id="prompt" style="margin:10px 0 6px;font-size:18px;font-weight:700">Cargando…</div>
+    <div id="hint" class="hint" style="display:none"></div>
+    <div class="grid" style="margin-top:8px">
+      <input id="answer" type="text" inputmode="decimal" placeholder="Escribe tu respuesta (número)"/>
       <div class="row">
         <button id="check" class="btn primary">Comprobar</button>
         <button id="skip" class="btn">Saltar</button>
+        <button id="showHint" class="btn">Pista</button>
       </div>
       <div id="feedback" class="muted"></div>
     </div>
+    <div class="diag" id="diagQuiz"></div>
   </div>
 
   <!-- Teoría exprés -->
   <div class="card">
-    <div style="font-weight:800;margin-bottom:6px">Teoría exprés</div>
-    <div id="theory" class="muted"></div>
+    <div style="font-weight:800;margin-bottom:6px">Teoría exprés (del tema actual)</div>
+    <div id="theory" class="muted">Cargando…</div>
   </div>
 
   <!-- Histórico simple -->
@@ -113,34 +122,49 @@
   const today = new Date().toISOString().slice(0,10);
   const SKEY = k => `${k}:${today}`;
 
-  // UI refs
+  // refs
   const el = {
-    date: $("#date"), topic: $("#topic"), prompt: $("#prompt"),
-    answer: $("#answer"), check: $("#check"), skip: $("#skip"),
-    feedback: $("#feedback"),
-    todayCount: $("#todayCount"), todayBar: $("#todayBar"),
-    streak: $("#streak"), corrects: $("#corrects"), level: $("#level"),
-    xp: $("#xp"), theory: $("#theory"), reset: $("#reset")
+    date: $("#date"), todayCount: $("#todayCount"), todayBar: $("#todayBar"),
+    level: $("#level"), prompt: $("#prompt"), answer: $("#answer"),
+    check: $("#check"), skip: $("#skip"), feedback: $("#feedback"),
+    theory: $("#theory"), xp: $("#xp"), streak: $("#streak"), corrects: $("#corrects"),
+    reset: $("#reset"), tabs: $("#tabs"), diagQuiz: $("#diagQuiz"), diagTabs: $("#diagTabs"),
+    showHint: $("#showHint"), hint: $("#hint")
   };
 
-  // Local state
+  // estado
   const state = {
     xp: +localStorage.getItem("xp") || 0,
     streak: +localStorage.getItem(SKEY("streak")) || 0,
     corrects: +localStorage.getItem("corrects") || 0,
     todaySolved: +localStorage.getItem(SKEY("solved")) || 0,
-    levelThreshold: 200, // normal
+    levelThreshold: 200,
     topic: localStorage.getItem("topic") || "aritmetica",
-    problem: null,
+    problem: null
   };
 
-  // Helpers
+  // helpers
   function clamp(n,a,b){ return Math.max(a, Math.min(b, n)); }
   function rint(a,b){ return Math.floor(Math.random()*(b-a+1))+a; }
   function fmt(n){ return String(n).replace(".", ","); }
   function t(n){ return String(n).replace(",", "."); }
+  const safeText = (s)=> (s==null? "" : String(s));
 
-  // Generadores
+  // teoría y pistas
+  const THEORY = {
+    aritmetica: "Orden: paréntesis → ×/÷ → +/−. Ej: 6 + 2×3 = 12.",
+    porcentajes: "p% de N = (p/100)·N. 10%: mueve una cifra; 5%: la mitad del 10%.",
+    fracciones: "Divide numerador/denominador. Redondea al final si piden decimales.",
+    velocidad: "v = d/t (m/s). Para pasar km/h a m/s: divide entre 3,6."
+  };
+  const HINTS = {
+    aritmetica: (a,b,op)=> `Aplica el orden: resuelve primero multiplicaciones/divisiones. Ejemplo: si fuera 8 + 12 ÷ 3, primero 12 ÷ 3 = 4, luego 8 + 4 = 12.`,
+    porcentajes: (pct,base)=> `Truco: 10% de ${base} es ${base/10}. ${pct}% ≈ (${pct}/100)·${base}.`,
+    fracciones: (n,d)=> `Divide ${n} entre ${d}. Redondea al final: usa tantos decimales como te pidan.`,
+    velocidad: (d,t)=> `v = d/t. Sustituye: v = ${d}/${t}. Redondea a las cifras pedidas.`
+  };
+
+  // generadores
   function genArit(d){
     const max = [20,30,40,60,80,120,200,300,500,800][clamp(d-1,0,9)];
     const ops = (d>=6) ? ["+","-","×","÷","mix"] : ["+","-","×","÷"];
@@ -151,15 +175,149 @@
     if(op==="mix"){
       const x=rint(5,max), y=rint(2,Math.min(40,Math.floor(max/2))), z=rint(2,12);
       const plus=Math.random()<0.5; const inner=plus?x+y:x-y;
-      return {p:`(${x} ${plus?"+":"-"} ${y}) × ${z} = ?`, a: inner*z, tol:0};
+      return {p:`(${x} ${plus?"+":"-"} ${y}) × ${z} = ?`, a: inner*z, tol:0, hint: HINTS.aritmetica(x,y,"×")};
     }
     const p = `${a} ${op} ${b} = ?`;
     const ans = op==="+"?a+b:op==="-"?a-b:op==="×"?a*b:a/b;
-    return {p, a:ans, tol:0};
+    return {p, a:ans, tol:0, hint: HINTS.aritmetica(a,b,op)};
   }
   function genPct(d){
     const base=rint(40,[100,200,400,600,800,1200,2000,4000,8000,12000][clamp(d-1,0,9)]);
     const nice=[5,10,20,25,50], messy=[7,12,15,17.5,22,27,33,37,42,66];
-    const pct = (d<=3?nice:messy)[rint(0,(d<=3?nice:messy).length-1)];
-    const dec = d<=3?2:2; // mantén 2 dec.
-    return {p:`¿${pct}% de ${bas
+    const pool = d<=3? nice : messy;
+    const pct = pool[rint(0,pool.length-1)];
+    const dec = 2;
+    return {p:`¿${pct}% de ${base}? (2 decimales)`, a:+(base*(pct/100)).toFixed(dec), tol:0.02, hint: HINTS.porcentajes(pct,base)};
+  }
+  function genFrac(d){
+    const denom=rint(2,[8,10,12,16,20,30,40,60,80,100][clamp(d-1,0,9)]);
+    const numer=rint(1,denom-1);
+    const dec = d<=3?3:d<=6?4:5;
+    return {p:`Convierte a decimal: ${numer}/${denom} (redondea a ${dec})`, a:+(numer/denom).toFixed(dec), tol:0.5*Math.pow(10,-dec), hint: HINTS.fracciones(numer,denom)};
+  }
+  function genVel(d){
+    const dist=rint(50*d,200*d+200), tt=rint(3+d,10+15*d);
+    const dec=d<=4?1:2;
+    return {p:`Un cuerpo recorre ${dist} m en ${tt} s. v = ? (m/s, ${dec} dec.)`, a:+(dist/tt).toFixed(dec), tol:dec===1?0.1:0.01, hint: HINTS.velocidad(dist,tt)};
+  }
+  function nextProblem(topic, diff){
+    if(topic==="aritmetica") return genArit(diff);
+    if(topic==="porcentajes") return genPct(diff);
+    if(topic==="fracciones") return genFrac(diff);
+    return genVel(diff);
+  }
+
+  // nivel/dificultad
+  function currentLevel(){ return 1 + Math.floor(state.xp / state.levelThreshold); }
+  function effectiveDifficulty(){
+    const base = clamp(currentLevel(),1,10);
+    const up = state.streak>=3 ? 1 : 0;
+    return clamp(base + up, 1, 10);
+  }
+
+  // UI
+  function setDate(){ el.date.textContent = new Intl.DateTimeFormat("es-ES",{dateStyle:"medium"}).format(new Date()); }
+  function setTabs(){
+    try{
+      const btns = el.tabs.querySelectorAll(".tab");
+      btns.forEach(b=>{
+        const topic = b.getAttribute("data-topic");
+        b.classList.toggle("active", topic===state.topic);
+      });
+      el.diagTabs.textContent = "Tema actual: " + state.topic;
+    }catch(err){ el.diagTabs.textContent = "Error tabs: " + (err.message||err); }
+  }
+  function setTheory(){
+    const txt = THEORY[state.topic] || "Repasa el concepto clave del tema.";
+    el.theory.textContent = txt;
+  }
+  function showProblem(){
+    try{
+      const diff = effectiveDifficulty();
+      state.problem = nextProblem(state.topic, diff);
+      el.prompt.textContent = safeText(state.problem.p);
+      el.level.textContent = currentLevel();
+      el.answer.value = "";
+      el.feedback.textContent = "";
+      el.hint.style.display = "none";
+      el.hint.textContent = safeText(state.problem.hint || "");
+      el.diagQuiz.textContent = "OK pregunta";
+    }catch(err){
+      el.prompt.textContent = "No pude generar la pregunta (recarga).";
+      el.diagQuiz.textContent = "Error pregunta: " + (err.message||err);
+    }
+  }
+  function updateBars(){
+    const pct = Math.min(100, (state.todaySolved/20)*100);
+    el.todayCount.textContent = state.todaySolved;
+    el.todayBar.style.width = pct + "%";
+    el.streak.textContent = state.streak;
+    el.corrects.textContent = state.corrects;
+    el.xp.textContent = state.xp;
+  }
+
+  // init
+  try{
+    setDate();
+    // restaurar tema (o default)
+    if(!["aritmetica","porcentajes","fracciones","velocidad"].includes(state.topic)){
+      state.topic="aritmetica"; localStorage.setItem("topic","aritmetica");
+    }
+    setTabs(); setTheory(); showProblem(); updateBars();
+  }catch(err){
+    el.diagQuiz.textContent = "Error init: " + (err.message||err);
+    el.prompt.textContent = "Error al iniciar. Recarga la página.";
+  }
+
+  // eventos
+  el.tabs.addEventListener("click",(e)=>{
+    const b = e.target.closest(".tab"); if(!b) return;
+    const t = b.getAttribute("data-topic");
+    state.topic = t; localStorage.setItem("topic", t);
+    setTabs(); setTheory(); showProblem();
+  });
+
+  el.showHint.addEventListener("click",()=>{
+    if(!el.hint.textContent) el.hint.textContent = "Piensa en el procedimiento: identifica datos, fórmula y redondeo.";
+    el.hint.style.display = "block";
+  });
+
+  el.check.addEventListener("click", ()=>{
+    try{
+      const val = Number(t(el.answer.value));
+      if(Number.isNaN(val)){ el.feedback.innerHTML = '<span class="bad">Introduce un número.</span>'; return; }
+      const ok = Math.abs(val - state.problem.a) <= state.problem.tol;
+      if(ok){
+        state.streak++; state.corrects++; state.xp += 12 + Math.min(20, state.streak*2);
+        state.todaySolved++;
+        localStorage.setItem(SKEY("streak"), state.streak);
+        localStorage.setItem("corrects", state.corrects);
+        localStorage.setItem("xp", state.xp);
+        localStorage.setItem(SKEY("solved"), state.todaySolved);
+        el.feedback.innerHTML = '<span class="ok">¡Correcto!</span>';
+        showProblem(); updateBars();
+      }else{
+        state.streak = 0; localStorage.setItem(SKEY("streak"), 0);
+        el.feedback.innerHTML = `<span class="bad">Incorrecto.</span> Solución: <b>${fmt(state.problem.a)}</b>`;
+        setTimeout(()=> showProblem(), 800);
+        updateBars();
+      }
+    }catch(err){
+      el.feedback.innerHTML = '<span class="bad">Error al corregir. Prueba de nuevo.</span>';
+      el.diagQuiz.textContent = "Error check: " + (err.message||err);
+    }
+  });
+
+  el.skip.addEventListener("click", ()=>{ state.streak=0; localStorage.setItem(SKEY("streak"),0); showProblem(); });
+
+  el.reset.addEventListener("click", ()=>{
+    state.streak = 0; state.todaySolved = 0;
+    localStorage.setItem(SKEY("streak"), 0);
+    localStorage.setItem(SKEY("solved"), 0);
+    updateBars();
+    showProblem();
+  });
+})();
+</script>
+</body>
+</html>
