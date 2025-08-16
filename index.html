@@ -36,8 +36,10 @@
   .switch{display:flex;align-items:center;gap:8px}
   .switch input{width:42px;height:24px;appearance:none;background:#e5e7eb;border-radius:999px;position:relative;outline:none;cursor:pointer}
   .switch input:checked{background:#4f46e5}
-  .switch input:after{content:\"\";position:absolute;top:3px;left:3px;width:18px;height:18px;border-radius:999px;background:#fff;transition:left .2s}
+  .switch input:after{content:"";position:absolute;top:3px;left:3px;width:18px;height:18px;border-radius:999px;background:#fff;transition:left .2s}
   .switch input:checked:after{left:21px}
+  /* teoría más grande y legible */
+  #theory{font-size:16.5px; line-height:1.55}
 </style>
 </head>
 <body>
@@ -64,7 +66,7 @@
     <div class="progress" style="margin-top:8px"><div id="todayBar"></div></div>
   </div>
 
-  <!-- Tabs de tema -->
+  <!-- Tabs de tema + modo sin calculadora -->
   <div class="card">
     <div class="row">
       <div style="font-weight:700;margin-bottom:8px">Elige el tema</div>
@@ -90,7 +92,7 @@
   <div class="card" id="quizCard">
     <div class="row">
       <div style="font-weight:700">Pregunta</div>
-      <div class="pill">Nivel <span id="level">1</span></div>
+      <div class="pill">Nivel <span id="level">1</span> · XP tema: <b id="xp">0</b></div>
     </div>
     <div id="prompt" style="margin:10px 0 6px;font-size:18px;font-weight:700">Cargando…</div>
     <div id="theory" class="muted" style="margin:4px 0 10px"></div>
@@ -107,11 +109,11 @@
     <div class="diag" id="diagQuiz"></div>
   </div>
 
-  <!-- Histórico simple -->
+  <!-- Histórico simple (global del día) -->
   <div class="card">
     <div class="row">
-      <div style="font-weight:700">Racha y nivel</div>
-      <div>XP: <b id="xp">0</b></div>
+      <div style="font-weight:700">Racha y progreso diario</div>
+      <div class="muted">Se guarda por día</div>
     </div>
     <div class="grid" style="grid-template-columns:1fr 1fr;gap:10px;margin-top:8px">
       <div class="card" style="padding:12px">
@@ -146,13 +148,22 @@
     noCalc: $("#noCalc")
   };
 
-  // estado
+  // ---- Estado con XP por tema ----
+  const TOPICS = ["aritmetica","porcentajes","fracciones","velocidad","algebra","proporciones","geometria","potencias","enteros"];
+  function loadJSON(key, def){ try{ const v = localStorage.getItem(key); return v? JSON.parse(v): def; }catch{ return def; } }
+  function saveJSON(key, obj){ localStorage.setItem(key, JSON.stringify(obj)); }
+
+  const xpByTopic = loadJSON("xpByTopic", Object.fromEntries(TOPICS.map(t=>[t,0])));
+  function getXP(topic){ return xpByTopic[topic]||0; }
+  function addXP(topic, pts){ xpByTopic[topic]=(xpByTopic[topic]||0)+pts; saveJSON("xpByTopic", xpByTopic); }
+  const LEVEL_THRESHOLD = 160; // XP por nivel (por tema)
+  function levelOf(topic){ return 1 + Math.floor(getXP(topic) / LEVEL_THRESHOLD); }
+
+  // estado diario (no por tema)
   const state = {
-    xp: +localStorage.getItem("xp") || 0,
     streak: +localStorage.getItem(SKEY("streak")) || 0,
     corrects: +localStorage.getItem("corrects") || 0,
     todaySolved: +localStorage.getItem(SKEY("solved")) || 0,
-    levelThreshold: 160, // sube un poco más rápido
     topic: localStorage.getItem("topic") || "aritmetica",
     problem: null,
     noCalc: true
@@ -168,83 +179,60 @@
     porcentajes: "p% de N = (p/100)·N. El 10% desplaza una cifra; el 5% es la mitad del 10%; el 25% es 1/4.",
     fracciones: "Una fracción a/b es a÷b. Convierte a decimal solo al final, con los decimales que pidan.",
     velocidad: "v = d/t. Asegúrate de que d y t están en las unidades correctas (m y s).",
-    algebra: "Ecuaciones lineales: pasa términos sumando/restando en ambos lados; despeja x dividiendo por el coeficiente.",
-    proporciones: "En una proporción a/b = c/d, cumple el producto en cruz: a·d = b·c. La regla de tres despeja el valor que falta.",
-    geometria: "Perímetro: suma de lados. Área: fórmulas básicas (rectángulo a·b, triángulo b·h/2, círculo πr²).",
+    algebra: "Ecuaciones lineales: pasa términos a un lado y despeja x. Simplifica combinando términos semejantes.",
+    proporciones: "En a/b = c/d, vale a·d = b·c. La regla de tres despeja el valor que falta.",
+    geometria: "Perímetro: suma de lados. Área: rectángulo a·b, triángulo b·h/2, círculo πr².",
     potencias: "a^m · a^n = a^(m+n). Raíz cuadrada es el número que al cuadrado da el original.",
-    enteros: "Con enteros, cuidado con los signos: suma/resta siguiendo la recta numérica."
+    enteros: "Con enteros, cuidado con los signos: −(−a)=+a; resta un negativo equivale a sumar."
   };
 
-  // “párrafo explicativo” por pregunta (se rellena dinámicamente)
   function theoryForProblem(p){
     switch(p.kind){
-      case "aritmetica":
-        return `Te piden calcular ${p.desc}. Primero resuelve multiplicaciones y divisiones; después suma/resta. Mantén los números pequeños: puedes hacerlo de cabeza.`;
-      case "porcentajes":
-        return `Buscas un porcentaje de una cantidad. Usa p% de N = (p/100)·N. Con p como ${p.pct} y N = ${p.base}. Intenta descomponer: 10% y 5% son fáciles.`;
-      case "fracciones":
-        return `Convierte la fracción a decimal. Divide el numerador entre el denominador. Redondea al final a ${p.dec} decimales.`;
-      case "velocidad":
-        return `Usa la fórmula v = d/t. Sustituye d=${p.dist} y t=${p.time}. Piensa en unidades: metros y segundos.`;
-      case "algebra_eq":
-        return `Ecuación lineal. Agrupa las x en un lado y los números en el otro con sumas/restas opuestas. Finalmente divide por el coeficiente de x.`;
-      case "algebra_simpl":
-        return `Simplifica expresión combinando términos semejantes (mismas letras y potencias). Ordena y reduce.`;
-      case "proporciones":
-        return `Proporcionalidad directa. Escribe la igualdad de razones y aplica producto en cruz para encontrar el valor faltante.`;
-      case "geometria_area":
-        return `Área básica. Identifica la figura y aplica la fórmula sencilla (rectángulo a·b, triángulo b·h/2, círculo πr² con π≈3,14 si hace falta).`;
-      case "potencias":
-        return `Aplica propiedades de potencias. Si piden raíz, piensa el número que al cuadrado da el original.`;
-      case "enteros":
-        return `Opera con enteros. Suma/resta teniendo en cuenta signos; si resta un negativo, se convierte en suma.`;
-      default:
-        return THEORY_BASE[state.topic] || "";
+      case "aritmetica":   return `Te piden calcular ${p.desc}. Resuelve ×/÷ antes que +/−. Números pequeños para hacerlo de cabeza.`;
+      case "porcentajes":  return `Calcula un porcentaje de una cantidad. Aplica p% de N = (p/100)·N. Usa 10% y 5% como atajos mentales.`;
+      case "fracciones":   return `Convierte la fracción a decimal dividiendo numerador entre denominador. Redondea a ${p.dec||2} decimales.`;
+      case "velocidad":    return `Aplica v = d/t con d=${p.dist} y t=${p.time}. Revisa unidades (m/s).`;
+      case "algebra_eq":   return `Ecuación ax+b=c. Resta b y divide por a: x=(c−b)/a.`;
+      case "algebra_simpl":return `Simplifica combinando términos semejantes (mismas letras/potencias).`;
+      case "proporciones": return `Proporcionalidad directa: usa el producto en cruz para encontrar el término que falta.`;
+      case "geometria_area":return `Identifica la figura y aplica la fórmula correspondiente (rectángulo, triángulo, círculo).`;
+      case "potencias":    return `Propiedades de potencias o raíz cuadrada exacta (mentalmente amigable).`;
+      case "enteros":      return `Opera con signos: suma/resta siguiendo reglas de enteros.`;
+      default:             return "";
     }
   }
 
   // generadores (modo sin calculadora = números pequeños)
-  function genArit(d,small){
-    const poolOps = ["+","-","×","÷"];
-    const op = choice(poolOps);
-    // rangos pequeños si small
+  function genArit(small){
+    const op = choice(["+","-","×","÷"]);
     let a = small ? rnd(3,20) : rnd(6,80);
     let b = small ? rnd(2,12) : rnd(3,30);
     if(op==="-" && b>a) [a,b]=[b,a];
-    if(op==="÷"){
-      // fuerza división exacta
-      b = small ? rnd(2,10) : rnd(2,12);
-      a = b * (small ? rnd(2,9) : rnd(2,20));
-    }
+    if(op==="÷"){ b = small ? rnd(2,10) : rnd(2,12); a = b * (small ? rnd(2,9) : rnd(2,20)); }
     const p = `${a} ${op} ${b} = ?`;
     const ans = op==="+"?a+b:op==="-"?a-b:op==="×"?a*b:a/b;
     return {kind:"aritmetica", p, a: ans, tol:0, desc:`${a} ${op} ${b}`};
   }
-
-  function genPct(d,small){
+  function genPct(small){
     const base = small ? choice([40,50,60,80,100,120,160,200]) : rnd(40,400);
     const pct = small ? choice([5,10,20,25,50]) : choice([7,12,15,22,33]);
     const ans = +(base*(pct/100)).toFixed(2);
-    return {kind:"porcentajes", p:`¿${pct}% de ${base}? (2 decimales)`, a: ans, tol:0.02, pct, base};
+    return {kind:"porcentajes", p:`¿${pct}% de ${base}? (2 decimales)`, a: ans, tol:0.02};
   }
-
-  function genFrac(d,small){
+  function genFrac(small){
     const denom = small ? choice([2,3,4,5,8,10]) : rnd(6,20);
     const numer = rnd(1,denom-1);
-    const dec = small ? 2 : (d<=6?3:4);
+    const dec = small ? 2 : 3;
     const ans = +(numer/denom).toFixed(dec);
     return {kind:"fracciones", p:`Convierte a decimal: ${numer}/${denom} (redondea a ${dec})`, a: ans, tol:0.5*Math.pow(10,-dec), dec};
   }
-
-  function genVel(d,small){
+  function genVel(small){
     const dist = small ? choice([60,80,90,100,120,150,180]) : rnd(80,500);
     const time = small ? choice([3,4,5,6,8,10,12,15]) : rnd(4,30);
-    const dec = small ? 1 : (d<=4?1:2);
+    const dec = small ? 1 : 2;
     const ans = +(dist/time).toFixed(dec);
     return {kind:"velocidad", p:`Un cuerpo recorre ${dist} m en ${time} s. v = ? (m/s, ${dec} dec.)`, a: ans, tol: dec===1?0.1:0.01, dist, time};
   }
-
-  // Álgebra: ecuaciones ax + b = c y simplificar
   function genAlgebraEq(small){
     const a = small ? choice([2,3,4,5]) : rnd(2,9);
     const x = small ? rnd(1,9) : rnd(2,20);
@@ -253,101 +241,50 @@
     return {kind:"algebra_eq", p:`Resuelve: ${a}x + ${b} = ${c}`, a: x, tol:0};
   }
   function genAlgebraSimpl(small){
-    // p.ej. 3x + 2x − 5 = ?
     const c1 = small ? rnd(1,5) : rnd(1,10);
     const c2 = small ? rnd(1,5) : rnd(1,10);
     const k  = small ? rnd(1,8) : rnd(1,20);
-    // pedimos el coeficiente resultante para x cuando se simplifica (3x+2x = 5x)
     const coef = c1 + c2;
-    return {
-      kind:"algebra_simpl",
-      p:`Simplifica y escribe el coeficiente de x: ${c1}x + ${c2}x − ${k}`,
-      a: coef, tol:0,
-    };
+    return {kind:"algebra_simpl", p:`Simplifica y escribe el coeficiente de x: ${c1}x + ${c2}x − ${k}`, a: coef, tol:0};
   }
-
-  // Proporciones: regla de tres directa
   function genProporciones(small){
-    // a/b = c/x  -> x = (b*c)/a ; usa números pequeños
-    const a = small ? choice([2,3,4,5,6]) : rnd(2,12);
-    const b = small ? choice([6,8,10,12,15]) : rnd(6,30);
-    const c = small ? choice([4,6,8,9,10]) : rnd(4,25);
-    const x = (b*c)/a;
-    // fuerza entero si small
-    let A=a,B=b,C=c,X=x;
-    if(small){
-      // rehacer hasta que sea entero
-      let tries=0;
-      while(Math.abs(X - Math.round(X))>1e-9 && tries<40){
-        const aa = choice([2,3,4,5,6]); const bb = choice([6,8,10,12,15]); const cc = choice([4,6,8,9,10]);
-        const xx = (bb*cc)/aa;
-        if(Math.abs(xx - Math.round(xx))<=1e-9){ A=aa;B=bb;C=cc;X=xx; break; }
-        tries++;
-      }
+    let A=choice([2,3,4,5,6]), B=choice([6,8,10,12,15]), C=choice([4,6,8,9,10]);
+    let X=(B*C)/A, tries=0;
+    while(Math.abs(X-Math.round(X))>1e-9 && tries<40){
+      A=choice([2,3,4,5,6]); B=choice([6,8,10,12,15]); C=choice([4,6,8,9,10]);
+      X=(B*C)/A; tries++;
     }
     return {kind:"proporciones", p:`Si ${A} → ${B}, entonces ${C} → x. Halla x.`, a: Math.round(X), tol:0};
   }
-
-  // Geometría: áreas y perímetros sencillos
   function genGeometria(small){
     const tipo = choice(["rect_area","tri_area","rect_peri","circ_area"]);
-    if(tipo==="rect_area"){
-      const a = small? rnd(2,12): rnd(3,20); const b = small? rnd(2,12): rnd(3,20);
-      return {kind:"geometria_area", p:`Área de rectángulo ${a}×${b}`, a:a*b, tol:0};
-    }
-    if(tipo==="rect_peri"){
-      const a = small? rnd(2,12): rnd(3,20); const b = small? rnd(2,12): rnd(3,20);
-      return {kind:"geometria_area", p:`Perímetro de rectángulo ${a}×${b}`, a:2*(a+b), tol:0};
-    }
-    if(tipo==="tri_area"){
-      const b = small? rnd(4,20): rnd(6,30); const h = small? rnd(3,12): rnd(4,20);
-      return {kind:"geometria_area", p:`Área de triángulo base ${b} y altura ${h}`, a:(b*h)/2, tol:0};
-    }
-    // circ area
-    const r = small? rnd(2,8): rnd(3,12);
-    const area = +(Math.PI*r*r).toFixed(2);
-    return {kind:"geometria_area", p:`Área de círculo de radio ${r} (π≈3,14, 2 dec.)`, a:area, tol:0.02};
+    if(tipo==="rect_area"){ const a=rnd(2,12), b=rnd(2,12); return {kind:"geometria_area", p:`Área rectángulo ${a}×${b}`, a:a*b, tol:0}; }
+    if(tipo==="rect_peri"){ const a=rnd(2,12), b=rnd(2,12); return {kind:"geometria_area", p:`Perímetro rectángulo ${a}×${b}`, a:2*(a+b), tol:0}; }
+    if(tipo==="tri_area"){ const b=rnd(4,20), h=rnd(3,12); return {kind:"geometria_area", p:`Área triángulo base ${b} y altura ${h}`, a:(b*h)/2, tol:0}; }
+    const r=rnd(2,8); return {kind:"geometria_area", p:`Área círculo radio ${r} (π≈3,14, 2 dec.)`, a:+(Math.PI*r*r).toFixed(2), tol:0.02};
   }
-
-  // Potencias/Raíces
   function genPotencias(small){
-    const mode = choice(["pow_sum","sqrt"]);
-    if(mode==="pow_sum"){
-      const a = small? choice([2,3,4,5]): rnd(2,7);
-      const m = small? rnd(1,3): rnd(1,4);
-      const n = small? rnd(1,3): rnd(1,4);
-      // pide a^(m)·a^(n)
-      return {kind:"potencias", p:`Calcula: ${a}^${m} · ${a}^${n}`, a: Math.pow(a,m+n), tol:0};
-    } else {
-      const sq = small? choice([4,9,16,25,36,49,64,81]): choice([9,16,25,36,49,64,81,100,121]);
-      return {kind:"potencias", p:`√${sq} = ?`, a: Math.round(Math.sqrt(sq)), tol:0};
-    }
+    if(Math.random()<0.5){ const a=choice([2,3,4,5]), m=rnd(1,3), n=rnd(1,3); return {kind:"potencias", p:`${a}^${m} · ${a}^${n}`, a:Math.pow(a,m+n), tol:0}; }
+    const sq = choice([4,9,16,25,36,49,64,81]); return {kind:"potencias", p:`√${sq} = ?`, a: Math.round(Math.sqrt(sq)), tol:0};
   }
-
-  // Enteros
   function genEnteros(small){
-    const a = small? rnd(-9,9) : rnd(-20,20);
-    const b = small? rnd(-9,9) : rnd(-20,20);
-    const op = choice(["+","-"]);
-    const ans = op==="+"? a+b : a-b;
+    const a=rnd(-9,9), b=rnd(-9,9), op=choice(["+","-"]); const ans=op==="+"?a+b:a-b;
     return {kind:"enteros", p:`${a} ${op} ${b} = ?`, a: ans, tol:0};
   }
 
-  // seleccionador por tema
   function nextProblem(){
-    const small = state.noCalc;
-    const lvl = 1 + Math.floor(state.xp / state.levelThreshold);
-    const topic = state.topic;
-    if(topic==="aritmetica") return genArit(lvl, small);
-    if(topic==="porcentajes") return genPct(lvl, small);
-    if(topic==="fracciones") return genFrac(lvl, small);
-    if(topic==="velocidad") return genVel(lvl, small);
-    if(topic==="algebra") return Math.random()<0.6 ? genAlgebraEq(small) : genAlgebraSimpl(small);
-    if(topic==="proporciones") return genProporciones(small);
-    if(topic==="geometria") return genGeometria(small);
-    if(topic==="potencias") return genPotencias(small);
-    if(topic==="enteros") return genEnteros(small);
-    return genArit(lvl, small);
+    const small = el.noCalc.checked;
+    const t = state.topic;
+    if(t==="aritmetica")   return genArit(small);
+    if(t==="porcentajes")  return genPct(small);
+    if(t==="fracciones")   return genFrac(small);
+    if(t==="velocidad")    return genVel(small);
+    if(t==="algebra")      return Math.random()<0.6 ? genAlgebraEq(small) : genAlgebraSimpl(small);
+    if(t==="proporciones") return genProporciones(small);
+    if(t==="geometria")    return genGeometria(small);
+    if(t==="potencias")    return genPotencias(small);
+    if(t==="enteros")      return genEnteros(small);
+    return genArit(small);
   }
 
   // UI helpers
@@ -363,8 +300,9 @@
     el.todayBar.style.width = pct + "%";
     el.streak.textContent = state.streak;
     el.corrects.textContent = state.corrects;
-    el.xp.textContent = state.xp;
-    el.level.textContent = 1 + Math.floor(state.xp / state.levelThreshold);
+    // XP/Nivel por tema actual
+    el.xp.textContent = getXP(state.topic);
+    el.level.textContent = levelOf(state.topic);
   }
 
   function showProblem(){
@@ -372,7 +310,6 @@
     el.prompt.textContent = state.problem.p;
     el.hint.style.display = "none";
     el.answer.value = "";
-    // teoría por pregunta + base del tema
     el.theory.textContent = theoryForProblem(state.problem) + " " + (THEORY_BASE[state.topic] || "");
     el.diagQuiz.textContent = "";
   }
@@ -382,13 +319,14 @@
     if(Number.isNaN(val)){ el.feedback.innerHTML = '<span class="bad">Introduce un número.</span>'; return; }
     const ok = Math.abs(val - state.problem.a) <= state.problem.tol;
     if(ok){
-      state.streak++; state.corrects++; state.xp += 10 + Math.min(20, state.streak*2);
-      state.todaySolved++;
+      state.streak++; state.corrects++; state.todaySolved++;
+      // XP por tema (10 + bonus por racha hasta +20)
+      const gained = 10 + Math.min(20, state.streak*2);
+      addXP(state.topic, gained);
       localStorage.setItem(SKEY("streak"), state.streak);
       localStorage.setItem("corrects", state.corrects);
-      localStorage.setItem("xp", state.xp);
       localStorage.setItem(SKEY("solved"), state.todaySolved);
-      el.feedback.innerHTML = '<span class="ok">¡Correcto!</span>';
+      el.feedback.innerHTML = `<span class="ok">¡Correcto!</span> (+${gained} XP)`;
       showProblem(); updateBars();
     }else{
       state.streak = 0; localStorage.setItem(SKEY("streak"), 0);
@@ -401,10 +339,7 @@
   // init
   setDate();
   el.noCalc.checked = true;
-  state.noCalc = true;
-  if(!["aritmetica","porcentajes","fracciones","velocidad","algebra","proporciones","geometria","potencias","enteros"].includes(state.topic)){
-    state.topic="aritmetica"; localStorage.setItem("topic","aritmetica");
-  }
+  if(!TOPICS.includes(state.topic)){ state.topic="aritmetica"; localStorage.setItem("topic","aritmetica"); }
   setTabs(); updateBars(); showProblem();
 
   // eventos
@@ -412,26 +347,23 @@
     const b = e.target.closest(".tab"); if(!b) return;
     state.topic = b.getAttribute("data-topic");
     localStorage.setItem("topic", state.topic);
-    setTabs(); showProblem();
+    setTabs(); updateBars(); showProblem();
   });
-  el.noCalc.addEventListener("change", ()=> { state.noCalc = el.noCalc.checked; showProblem(); });
-
+  el.noCalc.addEventListener("change", ()=> showProblem());
   el.showHint.addEventListener("click", ()=>{
-    // pista contextual rápida según el tipo
     const k = state.problem.kind;
     let text = "";
-    if(k==="porcentajes") text = "Descompón el porcentaje: 25% = 1/4; 10% y 5% son fáciles mentalmente.";
-    else if(k==="fracciones") text = "Haz la división a/b. Si es largo, usa fracciones conocidas (1/2=0,5; 1/4=0,25).";
-    else if(k==="algebra_eq") text = "Pasa b restando al otro lado y divide por a: x=(c−b)/a.";
-    else if(k==="proporciones") text = "Usa producto en cruz: a·x = b·c ⇒ x=(b·c)/a.";
-    else if(k==="geometria_area") text = "Rectángulo: a·b. Triángulo: b·h/2. Círculo: πr².";
-    else if(k==="potencias") text = "a^m·a^n = a^(m+n). Para raíces cuadradas, piensa el número al cuadrado.";
-    else if(k==="enteros") text = "Signos: + con − resta; − con − suma.";
-    else text = "Orden de operaciones: × y ÷ antes que + y −.";
+    if(k==="porcentajes") text = "Descompón el porcentaje: 25% = 1/4; 10% y 5% son atajos rápidos.";
+    else if(k==="fracciones") text = "Divide numerador entre denominador. Usa fracciones memorables: 1/2=0,5; 1/4=0,25.";
+    else if(k==="algebra_eq") text = "Pasa b al otro lado y divide por a: x=(c−b)/a.";
+    else if(k==="proporciones") text = "Producto en cruz: a·x = b·c ⇒ x=(b·c)/a.";
+    else if(k==="geometria_area") text = "Rect: a·b. Tri: b·h/2. Circ: πr² (usa π≈3,14).";
+    else if(k==="potencias") text = "a^m·a^n = a^(m+n). √n es el número que al cuadrado da n.";
+    else if(k==="enteros") text = "Con signos: −(−a)=+a; restar un negativo equivale a sumar.";
+    else text = "Orden de operaciones: ×/÷ antes que +/−.";
     el.hint.textContent = text;
     el.hint.style.display = "block";
   });
-
   el.check.addEventListener("click", checkAnswer);
   el.skip.addEventListener("click", ()=>{ state.streak=0; localStorage.setItem(SKEY("streak"),0); showProblem(); });
   el.reset.addEventListener("click", ()=>{
